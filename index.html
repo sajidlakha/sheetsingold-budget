@@ -650,7 +650,7 @@ function vToday(){
       </div>
       <div class="card">
         <h3>Log a spend <span class="tiny muted" style="letter-spacing:0;text-transform:none">${EDITION==='demo'?`${S.spends.length}/${DEMO_CAP} in the demo`:''}</span></h3>
-        <div class="quick">${(S.quick||[5,10,20,50]).map(a => `<button class="qa ${qaAmt===a?'on':''}" data-act="qa" data-v="${a}">+${esc(S.cur)}${a}</button>`).join('')}<button class="qa" data-act="importCSV" title="Import from my bank">${ico('upload')}</button></div>
+        <div class="quick">${(S.quick||[5,10,20,50]).map(a => `<button class="qa ${qaAmt===a?'on':''}" data-act="qa" data-v="${a}">+${esc(S.cur)}${a}</button>`).join('')}</div>
         <div class="inl"><input class="inp" id="amt" placeholder="Amount, or 12 coffee" value="${qaAmt??''}"><input class="inp" id="note" placeholder="Note (optional)"></div>
         <div class="envs">${S.envelopes.map(e => `<button class="env ${selEnv===e.id?'on':''}" data-act="env" data-id="${e.id}">${esc(e.name)}</button>`).join('')}</div>
         <div style="margin-top:12px;display:flex;justify-content:flex-end"><button class="btn gold" data-act="logNow">Log it</button></div>
@@ -892,7 +892,9 @@ function vSettings(){
         <div class="tiny muted" style="margin-top:8px">Total in savings: <b>${money((S.accounts||[]).filter(a=>a.type==='savings').reduce((q,a)=>q+(+a.balance||0),0),0)}</b>. Logged spending comes off your main account.</div></div>
       <div class="card"><h3>Your balance</h3><div class="small">Checking balance <b>${money(+S.balance,2)}</b> as of ${nice(S.balanceDate)}.</div><div class="tiny muted" style="margin:6px 0 12px">Type the number from your banking app now and then. Everything since is worked out for you.</div><button class="btn gold" data-act="balanceModal">Update balance</button></div>
       <div class="card"><h3>Keep your numbers safe</h3><div class="tiny muted" style="margin-bottom:12px">On iPhone and iPad, add this planner to your Home Screen first (Share › Add to Home Screen). Download a backup now and then, and you can restore it on any device.</div>
-        <div class="chipbar"><button class="btn" data-act="importCSV">${ico('upload')} Import from my bank (CSV)</button></div><div class="tiny muted" style="margin:6px 0 12px">In your online banking, download transactions as CSV, then pick the file here. It is read on this device only.</div>
+        <details style="margin-bottom:12px"><summary class="small" style="cursor:pointer;font-weight:700">Optional: import from my bank (CSV)</summary>
+          <div class="tiny muted" style="margin:8px 0">You never need this. Typing your spending works perfectly. If you like, you can download transactions from your online banking as a CSV file and pick it here. The file is read on this device only and is never sent anywhere.</div>
+          <button class="btn sm" data-act="importCSV">${ico('upload')} Choose a CSV file</button></details>
         <div class="chipbar"><button class="btn gold" data-act="backup">Download a backup</button><button class="btn" data-act="shareBackup">Send to my other device</button><button class="btn" data-act="restore">Restore a backup</button><button class="btn" data-act="csv">Export spending (CSV)</button></div><input type="file" id="restoreFile" accept=".json,application/json" style="display:none">
         <div class="tiny muted" style="margin-top:10px">Using a phone and a laptop? Tap "Send to my other device", pick WhatsApp, email or AirDrop, then open the planner there and choose Restore.</div>
         ${FSA ? `<div class="tip">${ico('shield')}<div><b>Auto-backup to a file:</b> ${abState === 'on' ? '<span class="green-t">On.</span> Every change is saved to your backup file.' : abState === 'paused' ? 'Paused after a restart.' : 'Off. Pick a file once (for example in OneDrive or Google Drive) and every change is saved there.'}
@@ -1458,7 +1460,7 @@ const FAQ = [
   ['What if I delete the app or change phones?', 'Your backup brings everything back. Keep auto-backup on (computer) or save a backup every week (phone). When you open the app again, choose "Restore my backup".'],
   ['Can other people on this device see my planner?', 'Each person gets their own planner. Add a PIN and yours is encrypted, so nobody else can open it.'],
   ['I forgot my PIN.', 'Your planner is encrypted with it, so it cannot be opened without it. That is what keeps it private. If you have a backup, remove the planner and restore the backup.'],
-  ['Can I import from my bank?', 'Yes. Download your transactions as a CSV file from your online banking and tap "Import from my bank". The file is read on this device only.']]],
+  ['Do I have to import from my bank?', 'No. It is completely optional and most people never use it. If you want to, download a CSV from your online banking and choose it under Profile & settings. The file is read on this device only and never sent anywhere.']]],
  ['Installing the app', [
   ['How do I put it on my phone?', 'iPhone: open in Safari, tap Share, then Add to Home Screen. Android: open in Chrome, tap the menu, then Install app. Computer: click Install app in the sidebar.'],
   ['Does it work without internet?', 'Yes. Once opened or installed, it works offline.'],
@@ -1477,7 +1479,7 @@ const TOUR = [
   ['.next', 'Your next step', 'One thing at a time. When a bill is due or your balance needs a check, it shows up here.'],
   ['.side .nav[data-go=bills], .bnav [data-go=bills]', 'Bills', 'Tick bills as they go out. Anything still unpaid is held back from safe to spend.'],
   ['[data-act=afford]', 'Can I afford it?', 'Thinking of buying something? Type the price and get a straight answer.'],
-  ['.side .brand, .bnav [data-go=more]', 'Profile, backups and more', 'Add a PIN, keep a backup, import from your bank, change colours and text size. Help & FAQ is here too.']];
+  ['.side .brand, .bnav [data-go=more]', 'Profile, backups and more', 'Add a PIN, keep a backup, change colours and text size. Help & FAQ is here too.']];
 function tour(i){
   document.querySelectorAll('.tour-mask,.tour-spot,.tour-tip').forEach(x => x.remove()); if (i >= TOUR.length) { S.toured = true; save(true); return; }
   if (view !== 'today') { view = 'today'; render(); }
