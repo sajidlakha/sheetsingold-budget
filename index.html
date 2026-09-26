@@ -253,6 +253,7 @@ button,input,select,textarea{font:inherit;color:inherit}
  .bnav button{background:none;border:0;display:flex;flex-direction:column;align-items:center;gap:3px;font-size:10.5px;font-weight:700;color:var(--muted);cursor:pointer;flex:1}
  .bnav button .ic{font-size:19px}.bnav button.on{color:var(--gold)}
  .bnav .plus{background:var(--gold);color:var(--onacc);border-radius:50%;width:50px;height:50px;flex:0 0 50px;margin-top:-22px;box-shadow:var(--shadow);font-size:26px;font-weight:800;justify-content:center}
+ .row{flex-wrap:wrap;row-gap:6px}.row .grow{flex:1 1 55%}.row .btn.sm{padding:6px 9px}
  .install{flex-wrap:wrap;gap:10px 12px}.install .grow{flex:1 1 170px}.install img{width:44px;height:44px;flex-basis:44px}
  .top .chipbar{gap:6px}.top .chipbar .btn{padding:8px 11px;font-size:12px}
  .cal{gap:4px}.cal .c{min-height:58px;padding:4px;border-radius:9px}.cal .h{font-size:9.5px;letter-spacing:0}.card{padding:16px}.g4.keep{gap:12px}.kpi .v{font-size:23px}.cal .ev{font-size:0;height:6px;padding:0}.cal .ev.s{display:none}
@@ -481,7 +482,8 @@ const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.
 const inAppBrowser = () => /FBAN|FBAV|Instagram|Etsy|Line\/|Pinterest|TikTok/i.test(navigator.userAgent);
 window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferredPrompt = e; if (S && S.setupDone) render(); });
 window.addEventListener('appinstalled', () => { deferredPrompt = null; if (S) { S.installed = true; save(); render(); } toast('Installed. Look for the Budget Planner icon on your home screen or desktop.'); });
-function canOfferInstall(){ return !isStandalone() && !(S && S.installed && !deferredPrompt); }
+const CLEAN_SHOT = new URLSearchParams(location.search).has('clean');
+function canOfferInstall(){ if (CLEAN_SHOT && S && S.example) return false; return !isStandalone() && !(S && S.installed && !deferredPrompt); }
 function installCard(){
   if (!canOfferInstall() || (S.installHide && diff(TODAY(), S.installHide) < 14)) return '';
   return `<div class="install hide-focus"><img src="icon-192.png" alt=""><div class="grow"><b>Put Budget Planner on your ${isIOS()||/android/i.test(navigator.userAgent)?'home screen':'desktop'}</b><div class="tiny muted" style="margin-top:3px">${isIOS() ? 'Install first, then add your numbers: on iPhone the installed app keeps its own separate storage.' : 'Opens like a real app, works offline and keeps your numbers safer.'}</div></div><button class="btn gold" data-act="install">Install</button><button class="btn sm ghost" data-act="installLater">Later</button></div>`;
@@ -1309,7 +1311,7 @@ function example(){
     Object.assign(m('Car insurance',372,1,'Car'), {freq:'months', every:6, anchor:addD(t, 50), setAside:true})];
   // tick everything already due
   s.bills.forEach(b => occ(b, s.start, addD(t,-1)).forEach(d => b.paid[d] = true));
-  s.envelopes = [{id:'e1',name:'Groceries',cap:420},{id:'e2',name:'Fuel',cap:160},{id:'e3',name:'Eating out',cap:120},{id:'e4',name:'Fun money',cap:80}];
+  s.envelopes = [{id:'e1',name:'Groceries',cap:560},{id:'e2',name:'Fuel',cap:180},{id:'e3',name:'Eating out',cap:140},{id:'e4',name:'Fun money',cap:90, roll:true, rollFrom:ds(new Date(pd(t).getFullYear(), pd(t).getMonth()-1, 1, 12)).slice(0,7)}];
   s.goals = [{id:'g1',name:'Emergency fund',target:3000,saved:1240,monthly:150,inSafe:true},{id:'g2',name:'Summer trip',target:1200,saved:380,monthly:100,inSafe:true}];
   s.debts = [{id:'d1',name:'Visa card',balance:2400,apr:22.9,min:65,day:20,paid:{}},{id:'d2',name:'Car loan',balance:6900,apr:7.4,min:210,day:6,paid:{}}];
   s.debts.forEach(d => occ({freq:'monthly', day:d.day}, s.start, addD(t,-1)).forEach(x => d.paid[x] = true));
@@ -1515,7 +1517,18 @@ if (people.list.length > 1 && !QS.has('example')) whoScreen();
 else if (me().locked && isEncrypted(localStorage.getItem(keyFor(people.active)) || '')) lockScreen(people.active);
 else if (!S || !S.setupDone) onboard();
 else { afterOpen(); if (GO_LOG) A.logModal(); }
-if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(()=>{});
+/* screenshot helper: only on example data, never touches a real planner */
+if (S && S.example && QS.get('show')) setTimeout(() => { const w = QS.get('show');
+  if (w === 'afford') { A.afford(); document.getElementById('af_amt').value = QS.get('amt') || '600'; document.getElementById('af_name').value = QS.get('item') || 'New headphones'; A.affordCheck(); }
+  if (w === 'explain') A.explain();
+  if (w === 'tour') tour(+QS.get('step') || 0);
+  if (w === 'lock') lockScreen(people.active);
+  if (w === 'who') { people.list.push({id:'demo2', name:'Ayesha', color:'#7C63C9', locked:true}, {id:'demo3', name:'Omar', color:'#4E8B6E', locked:false}); whoScreen(); }
+  if (w === 'install') A.installHelp();
+  if (w === 'pin') A.pinModal();
+  if (w === 'log') { A.logModal(); document.getElementById('m_amt').value = '12.50'; document.getElementById('m_note').value = 'Coffee with Mia'; }
+}, 400);
+if ('serviceWorker' in navigator && location.protocol.startsWith('http') && !QS.has('show')) navigator.serviceWorker.register('sw.js').catch(()=>{});
 </script>
 </body>
 </html>
