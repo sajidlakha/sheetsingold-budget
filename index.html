@@ -333,6 +333,27 @@ const uid = () => Math.random().toString(36).slice(2,9);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 /* ---------- state ---------- */
+/* ---------- people on this device + encryption ---------- */
+const REG = 'sig_people_v1';
+let people = loadPeople(), cryptoKey = null;
+function loadPeople(){
+  try { const r = JSON.parse(localStorage.getItem(REG)); if (r && Array.isArray(r.list) && r.list.length && r.list.every(x => x && x.id)) { if (!r.list.some(x => x.id === r.active)) r.active = r.list[0].id; return r; } } catch(e){}
+  let name = ''; try { const d = JSON.parse(localStorage.getItem(KEY)); if (d && d.name) name = String(d.name).slice(0,40); } catch(e){}
+  const r = {active:'p1', list:[{id:'p1', name, color:'', locked:false}]}; try { localStorage.setItem(REG, JSON.stringify(r)); } catch(e){} return r;
+}
+const savePeople = () => { try { localStorage.setItem(REG, JSON.stringify(people)); } catch(e){} };
+const keyFor = id => id === 'p1' ? KEY : KEY + ':' + id;
+const me = () => people.list.find(x => x.id === people.active) || people.list[0];
+const b64 = buf => { const a = new Uint8Array(buf); let s = ''; for (let i = 0; i < a.length; i += 0x8000) s += String.fromCharCode.apply(null, a.subarray(i, i + 0x8000)); return btoa(s); };
+const unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+const newSalt = () => b64(crypto.getRandomValues(new Uint8Array(16)));
+async function deriveKey(pin, salt){
+  const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(String(pin)), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey({name:'PBKDF2', salt:unb64(salt), iterations:210000, hash:'SHA-256'}, base, {name:'AES-GCM', length:256}, false, ['encrypt','decrypt']);
+}
+async function encryptText(text, key, salt){ const iv = crypto.getRandomValues(new Uint8Array(12)); const ct = await crypto.subtle.encrypt({name:'AES-GCM', iv}, key, new TextEncoder().encode(text)); return JSON.stringify({enc:1, kind:'sig-budget', salt, iv:b64(iv), ct:b64(ct)}); }
+async function decryptText(blob, key){ const o = typeof blob === 'string' ? JSON.parse(blob) : blob; const pt = await crypto.subtle.decrypt({name:'AES-GCM', iv:unb64(o.iv)}, key, unb64(o.ct)); return new TextDecoder().decode(pt); }
+const isEncrypted = raw => { try { const o = JSON.parse(raw); return !!(o && o.enc === 1 && o.ct); } catch(e){ return false; } };
 let S = load();
 let view = 'today', calMonth = null, selEnv = null, qaAmt = null, focus = false;
 function blank(){
@@ -351,8 +372,17 @@ function clean(d){ const b = blank(), o = Object.assign(b, d);
   ['start','balanceDate'].forEach(k => { if (!/^\d{4}-\d{2}-\d{2}$/.test(o[k]||'')) o[k] = TODAY(); });
   o.spends = o.spends.filter(x => x && /^\d{4}-\d{2}-\d{2}$/.test(x.date) && isFinite(+x.amount)).map(x => (x.amount = +x.amount, x));
   return o; }
-function load(){ try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && s.v) return clean(s); } catch(e){} return null; }
-function save(){ try { localStorage.setItem(KEY, JSON.stringify(S)); } catch(e){ toast('Could not save on this device. Download a backup in Settings.'); } }
+function load(){ try { const raw = localStorage.getItem(keyFor(people.active)); if (!raw || isEncrypted(raw)) return null; const s = JSON.parse(raw); if (s && s.v) return clean(s); } catch(e){} return null; }
+let saveSeq = 0;
+function save(quiet){
+  if (!S) return; const who = people.active, m = me(), data = JSON.stringify(S);
+  if (m.name !== (S.name||'') || m.color !== ((S.profile||{}).color||'')) { m.name = String(S.name||'').slice(0,40); m.color = (S.profile||{}).color || ''; savePeople(); }
+  const fail = () => toast('Could not save on this device. Download a backup in Settings.');
+  if (m.locked) { if (!cryptoKey) return; const seq = ++saveSeq, key = cryptoKey, salt = m.salt;
+    encryptText(data, key, salt).then(blob => { if (seq !== saveSeq || who !== people.active) return; try { localStorage.setItem(keyFor(who), blob); } catch(e){ fail(); } }); }
+  else { try { localStorage.setItem(keyFor(who), data); } catch(e){ fail(); } }
+  if (!quiet) autoBackupSoon();
+}
 const money = (n, dp) => { const neg = n < 0; n = Math.abs(n); const f = (dp===0 || (dp===undefined && n>=1000)) ? n.toLocaleString(undefined,{maximumFractionDigits:0}) : n.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); return (neg?'-':'')+S.cur+f; };
 
 /* ---------- recurrence ---------- */
@@ -438,7 +468,7 @@ window.addEventListener('appinstalled', () => { deferredPrompt = null; if (S) { 
 function canOfferInstall(){ return !isStandalone() && !(S && S.installed && !deferredPrompt); }
 function installCard(){
   if (!canOfferInstall() || (S.installHide && diff(TODAY(), S.installHide) < 14)) return '';
-  return `<div class="install hide-focus"><img src="icon-192.png" alt=""><div class="grow"><b>Put Budget Planner on your ${isIOS()||/android/i.test(navigator.userAgent)?'home screen':'desktop'}</b><div class="tiny muted" style="margin-top:3px">Opens like a real app, works offline and keeps your numbers safer.</div></div><button class="btn gold" data-act="install">Install</button><button class="btn sm ghost" data-act="installLater">Later</button></div>`;
+  return `<div class="install hide-focus"><img src="icon-192.png" alt=""><div class="grow"><b>Put Budget Planner on your ${isIOS()||/android/i.test(navigator.userAgent)?'home screen':'desktop'}</b><div class="tiny muted" style="margin-top:3px">${isIOS() ? 'Install first, then add your numbers: on iPhone the installed app keeps its own separate storage.' : 'Opens like a real app, works offline and keeps your numbers safer.'}</div></div><button class="btn gold" data-act="install">Install</button><button class="btn sm ghost" data-act="installLater">Later</button></div>`;
 }
 const SHARE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M8 7l4-4 4 4"/><path d="M5 11v8a2 2 0 002 2h10a2 2 0 002-2v-8"/></svg>';
 const ADD_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M12 8v8M8 12h8"/></svg>';
@@ -557,7 +587,7 @@ function render(){
   const V = {today:vToday, month:vMonth, bills:vBills, money:vMoney, insights:vInsights, goals:vGoals, debt:vDebt, envelopes:vEnvelopes, settings:vSettings}[view] || vToday;
   document.getElementById('app').innerHTML = `
   <aside class="side">
-    <div class="brand" data-go="settings" style="cursor:pointer">${avatarHTML()}<div><b>${esc(S.title||'My money plan')}</b><small>${esc(S.name||'Budget Planner')}</small></div></div>
+    <div class="brand" data-act="switchPerson" title="Switch person" style="cursor:pointer">${avatarHTML()}<div><b>${esc(S.title||'My money plan')}</b><small>${esc(S.name||'Budget Planner')}</small></div></div>
     ${NAV.map(n => `<button class="nav ${view===n[0]?'on':''}" data-go="${n[0]}"><span class="ic">${ico(n[2])}</span>${n[1]}</button>`).join('')}
     <div class="grow"></div>
     ${canOfferInstall() ? `<button class="inst" data-act="install">${ico('plus')} Install app</button>` : ''}
@@ -583,8 +613,9 @@ function vToday(){
   const todays = S.spends.filter(s => s.date === t).slice().reverse();
   const next = nextThing(c);
   const away = diff(t, S.lastOpenPrev || t) >= 7;
-  return `${head(greet(), nice(t)+' · '+esc(S.title||''), `<button class="btn hide-focus" data-act="afford">${ico('spark')} Can I afford it?</button><button class="btn" data-act="privacy" title="Hide amounts">${ico((S.profile||{}).privacy?'eyeoff':'eye')}</button><button class="btn" data-act="themeModal" title="Colour theme">${ico('theme')}</button><button class="btn ${focus?'gold':''}" data-act="focus">${focus?'Show all':'Focus'}</button>`)}
+  return `${head(greet(), nice(t)+' · '+esc(S.title||''), `<button class="btn hide-focus" data-act="afford">${ico('spark')} Can I afford it?</button>${me().locked ? `<button class="btn" data-act="lockNow" title="Lock">🔒</button>` : ''}<button class="btn" data-act="privacy" title="Hide amounts">${ico((S.profile||{}).privacy?'eyeoff':'eye')}</button><button class="btn" data-act="themeModal" title="Colour theme">${ico('theme')}</button><button class="btn ${focus?'gold':''}" data-act="focus">${focus?'Show all':'Focus'}</button>`)}
   ${installCard()}
+  ${backupCard()}
   ${away ? `<div class="card hide-focus" style="margin-bottom:18px;border-color:var(--gold)"><h3>While you were away <button class="btn sm ghost" data-act="dismissAway">Not now</button></h3>
      <div class="small muted" style="margin-bottom:10px">It has been a while. Three quick checks and every number is right again.</div>
      <div class="chipbar"><button class="btn" data-go="bills">1 · Tick bills that went out</button><button class="btn" data-go="money">2 · Check money that came in</button><button class="btn gold" data-act="balanceModal">3 · Type today's balance</button></div></div>` : ''}
@@ -831,7 +862,14 @@ function vSettings(){
       <div class="card"><h3>Your balance</h3><div class="small">Checking balance <b>${money(+S.balance,2)}</b> as of ${nice(S.balanceDate)}.</div><div class="tiny muted" style="margin:6px 0 12px">Type the number from your banking app now and then. Everything since is worked out for you.</div><button class="btn gold" data-act="balanceModal">Update balance</button></div>
       <div class="card"><h3>Keep your numbers safe</h3><div class="tiny muted" style="margin-bottom:12px">On iPhone and iPad, add this planner to your Home Screen first (Share › Add to Home Screen). Download a backup now and then, and you can restore it on any device.</div>
         <div class="chipbar"><button class="btn gold" data-act="backup">Download a backup</button><button class="btn" data-act="shareBackup">Send to my other device</button><button class="btn" data-act="restore">Restore a backup</button><button class="btn" data-act="csv">Export spending (CSV)</button></div><input type="file" id="restoreFile" accept=".json,application/json" style="display:none">
-        <div class="tiny muted" style="margin-top:10px">Using a phone and a laptop? Tap "Send to my other device", pick WhatsApp, email or AirDrop, then open the planner there and choose Restore.</div></div>
+        <div class="tiny muted" style="margin-top:10px">Using a phone and a laptop? Tap "Send to my other device", pick WhatsApp, email or AirDrop, then open the planner there and choose Restore.</div>
+        ${FSA ? `<div class="tip">${ico('shield')}<div><b>Auto-backup to a file:</b> ${abState === 'on' ? '<span class="green-t">On.</span> Every change is saved to your backup file.' : abState === 'paused' ? 'Paused after a restart.' : 'Off. Pick a file once (for example in OneDrive or Google Drive) and every change is saved there.'}
+          <div class="chipbar" style="margin-top:8px">${abState === 'on' ? '<button class="btn sm" data-act="abOff">Turn off</button>' : abState === 'paused' ? '<button class="btn sm gold" data-act="abResume">Turn back on</button>' : '<button class="btn sm gold" data-act="abOn">Turn on auto-backup</button>'}</div></div></div>` : ''}
+        <div class="tiny muted" style="margin-top:8px">Last backup: <b>${S.lastBackup ? nice(S.lastBackup) : 'never'}</b>${me().locked ? ' · backups are encrypted with your PIN' : ''}</div></div>
+      <div class="card"><h3>People on this device</h3>
+        <div class="small muted" style="margin-bottom:10px">Each person has a separate planner. A PIN keeps yours private and encrypted.</div>
+        ${people.list.map(x => `<div class="row">${personAvatar(x)}<div class="grow"><div class="nm">${esc(x.name || 'Unnamed')}${x.id === people.active ? ' <span class="pill gold">you</span>' : ''}</div><div class="meta">${x.locked ? '🔒 PIN protected, encrypted' : 'No PIN'}</div></div></div>`).join('')}
+        <div class="chipbar" style="margin-top:12px"><button class="btn gold" data-act="pinModal">${me().locked ? 'Change or remove PIN' : 'Protect with a PIN'}</button><button class="btn" data-act="switchPerson">Switch or add a person</button>${me().locked ? '<button class="btn" data-act="lockNow">Lock now</button>' : ''}</div></div>
       <div class="card"><h3>Use it like an app</h3><div style="display:flex;gap:14px;align-items:center"><img src="icon-192.png" alt="" style="width:56px;height:56px;border-radius:14px"><div class="tiny muted">${isStandalone() ? 'You are using the installed app. It opens from your home screen or desktop and works offline.' : 'Install Budget Planner on your phone and your computer. It gets its own icon, opens in its own window and works offline.'}</div></div>
         ${isStandalone() ? '' : `<div class="chipbar" style="margin-top:12px"><button class="btn gold" data-act="install">Install app</button><button class="btn" data-act="installHelp">How to install</button></div>`}</div>
       <div class="card"><h3>Your data and privacy</h3>
@@ -958,12 +996,29 @@ const A = {
   saveSettings(){ if (document.getElementById('s_bio')) { S.profile = S.profile || {}; S.profile.bio = val('s_bio'); } if (!document.getElementById('s_cur')) { S.name = val('s_name'); S.title = val('s_title') || 'My money plan'; save(); render(); return toast('Profile saved.'); }
     S.name = val('s_name'); S.title = val('s_title') || 'My money plan'; S.cur = val('s_cur'); S.buffer = num('s_buf');
     const q = val('s_quick').split(/[ ,]+/).map(Number).filter(n => n > 0).slice(0,6); if (q.length) S.quick = q; save(); render(); toast('Saved.'); },
-  backup(){ const blob = new Blob([JSON.stringify(S,null,1)], {type:'application/json'}); dl(blob, `budget-backup-${TODAY()}.json`); toast('Backup downloaded. Keep it somewhere safe.'); },
-  restore(){ const f = document.getElementById('restoreFile'); f.onchange = () => { const file = f.files[0]; if (!file) return; const r = new FileReader(); r.onload = () => { try { const d = JSON.parse(r.result); if (!d || typeof d !== 'object' || !d.v) throw 0; const snap = snapshot(); S = clean(d); S.setupDone = true; save(); render(); toast('Backup restored.', () => restoreSnap(snap)); } catch(e){ toast('That file is not a planner backup.'); } }; r.readAsText(file); }; f.click(); },
+  async backup(){ const blob = new Blob([await backupText()], {type:'application/json'}); dl(blob, `budget-planner-backup-${TODAY()}.json`); markBackedUp(); toast(me().locked ? 'Encrypted backup downloaded. You need your PIN to restore it.' : 'Backup downloaded. Keep it somewhere safe.'); },
+  restore(){ const f = document.getElementById('restoreFile'); f.onchange = () => { const file = f.files[0]; if (!file) return; const r = new FileReader(); r.onload = () => { try { const d = JSON.parse(r.result); if (d && d.enc === 1 && d.ct && d.salt) return restoreEncrypted(d); if (!d || typeof d !== 'object' || !d.v) throw 0; const snap = S ? snapshot() : null; S = clean(d); S.setupDone = true; S.appWelcomed = true; save(); render(); toast('Backup restored. Welcome back.', snap ? () => restoreSnap(snap) : null); } catch(e){ toast('That file is not a planner backup.'); } }; r.readAsText(file); }; f.click(); },
+  csvGuard(){},
   csv(){ const rows = [['Date','Amount','Envelope','Note']].concat(S.spends.slice().sort((a,b)=>a.date<b.date?-1:1).map(s => [s.date, s.amount, (S.envelopes.find(e=>e.id===s.env)||{}).name||'', s.note||''])); dl(new Blob([rows.map(r => r.map(x => '"'+String(x).replace(/"/g,'""')+'"').join(',')).join('\n')], {type:'text/csv'}), `spending-${TODAY()}.csv`); },
   exampleAgain(){ if (!confirm('Replace your numbers with the example? Download a backup first if you want to keep them.')) return; S = example(); save(); view = 'today'; render(); },
-  erase(){ if (!confirm('Erase everything on this device? This cannot be undone unless you have a backup.')) return; localStorage.removeItem(KEY); S = null; onboard(); },
+  erase(){ A.forgetPerson(); },
   close(){ close(); },
+  addPersonSave(){ const nm = val('np_name'); if (!nm) return toast('Type a name first.'); save(true); const id = 'p' + uid(); people.list.push({id, name:nm.slice(0,40), color:'', locked:false}); people.active = id; savePeople(); cryptoKey = null; close();
+    S = null; onboard(0, {name:nm}); },
+  switchPerson(){ save(true); whoScreen(); },
+  lockNow(){ lockNow(); },
+  pinModal(){ const m = me(); modal(`<h2>${m.locked ? 'Change your PIN' : 'Protect with a PIN'}</h2><div class="small muted" style="line-height:1.5">Your planner is encrypted on this device with your PIN (AES-256). Anyone else using this device cannot open it. <b>If you forget the PIN, the data cannot be recovered</b>, so keep a backup.</div>
+    <div class="inl"><div><label class="lbl">New PIN (4 to 8 numbers)</label><input class="inp" id="pin1" type="password" inputmode="numeric" maxlength="8" autocomplete="new-password"></div><div><label class="lbl">Type it again</label><input class="inp" id="pin2" type="password" inputmode="numeric" maxlength="8" autocomplete="new-password"></div></div>
+    <div class="acts">${m.locked ? '<button class="btn red" data-act="pinRemove">Remove PIN</button>' : ''}<button class="btn ghost" data-act="close">Cancel</button><button class="btn gold" data-act="pinSave">Save PIN</button></div>`); },
+  async pinSave(){ const a = val('pin1'), b = val('pin2'); if (!/^\d{4,8}$/.test(a)) return toast('Use 4 to 8 numbers.'); if (a !== b) return toast('The two PINs do not match.');
+    const salt = newSalt(), key = await deriveKey(a, salt), m = me(); m.locked = true; m.salt = salt; cryptoKey = key; savePeople(); save(); close(); render(); toast('PIN saved. Your planner is now encrypted on this device.'); },
+  pinRemove(){ if (!confirm('Remove the PIN? Your planner will no longer be encrypted on this device.')) return; const m = me(); m.locked = false; delete m.salt; cryptoKey = null; savePeople(); save(); close(); render(); toast('PIN removed.'); },
+  forgetPerson(){ if (!confirm('Remove this planner and all its numbers from this device? This cannot be undone.')) return; const id = people.active; localStorage.removeItem(keyFor(id)); idbSet('ab:'+id, undefined);
+    people.list = people.list.filter(x => x.id !== id); if (!people.list.length) people.list = [{id:'p1', name:'', color:'', locked:false}]; people.active = people.list[0].id; savePeople(); cryptoKey = null; close(); people.list.length > 1 ? whoScreen() : openPerson(people.active); },
+  abOn(){ abOn(); }, abResume(){ abResume(); }, abOff(){ abOff(); },
+  backupLater(){ S.backupSnooze = TODAY(); save(true); render(); },
+  waSave(){ const nm = val('wa_name'); if (nm) S.name = nm.slice(0,40); S.appWelcomed = true; save(); close(); render(); },
+  waFresh(){ const nm = val('wa_name'); const keep = {theme:S.theme}; S = blank(); S.theme = keep.theme; S.appWelcomed = true; save(true); close(); onboard(0, {name:nm, skipWelcome:true}); },
   async install(){ if (deferredPrompt) { deferredPrompt.prompt(); const r = await deferredPrompt.userChoice.catch(() => null); deferredPrompt = null; if (r && r.outcome === 'accepted') { S.installed = true; save(); } render(); return; } A.installHelp(); },
   installLater(){ S.installHide = TODAY(); save(); render(); },
   installHelp(){
@@ -972,7 +1027,7 @@ const A = {
     else if (isIOS()) body = `<div class="muted small">iPhone and iPad install web apps from Safari. It takes 10 seconds.</div><div class="ios-steps">
         <div>Open this page in <b>Safari</b></div><div>Tap the <b>Share</b> button ${SHARE_ICON} at the bottom (or top on iPad)</div>
         <div>Scroll and tap <b>Add to Home Screen</b> ${ADD_ICON}</div><div>Tap <b>Add</b>. The gold <b>Budget Planner</b> icon appears on your home screen</div></div>
-        <div class="tip">${ico('shield')}<div>Open Budget Planner from its icon from now on. On iPhone this also keeps your numbers from being cleared by Safari.</div></div>`;
+        <div class="tip">${ico('shield')}<div>Open Budget Planner from its icon from now on. <b>Already added numbers in Safari?</b> Before installing, go to Profile & settings › Send to my other device and save the file. Then open the installed app and choose <b>Restore my backup</b>.</div></div>`;
     else if (/android/i.test(navigator.userAgent)) body = `<div class="ios-steps"><div>Open this page in <b>Chrome</b></div><div>Tap the <b>⋮</b> menu at the top right</div><div>Tap <b>Install app</b> (or <b>Add to Home screen</b>)</div><div>Tap <b>Install</b>. The Budget Planner icon appears with your other apps</div></div>`;
     else body = `<div class="ios-steps"><div><b>Chrome or Edge:</b> click the install icon ${ADD_ICON} at the right end of the address bar, or the menu › <b>Install Budget Planner</b> (Edge: <b>Apps › Install this site as an app</b>)</div>
         <div>Click <b>Install</b>. Budget Planner gets a desktop icon, a Start menu or Dock entry and its own window</div><div><b>Safari on Mac:</b> File › <b>Add to Dock</b></div></div>`;
@@ -997,12 +1052,19 @@ const A = {
   md(el){ const k = el.dataset.k, w = weekKey(); S.mdate = S.mdate && S.mdate.w === w ? S.mdate : {w, done:{}}; if (S.mdate.done[k]) delete S.mdate.done[k]; else S.mdate.done[k] = true; save(); render();
     if (mdSteps().every(x => x.ok)) { addWin('Weekly check-in done for the week of '+short(weekStart())); confetti(); } },
   ics(){ dl(new Blob([makeICS()], {type:'text/calendar'}), 'budget-reminders.ics'); toast('Open the file on your phone to add the reminders.'); },
-  async shareBackup(){ const f = new File([JSON.stringify(S)], `budget-backup-${TODAY()}.json`, {type:'application/json'});
+  async shareBackup(){ const f = new File([await backupText()], `budget-planner-backup-${TODAY()}.json`, {type:'application/json'}); markBackedUp();
     try { if (navigator.canShare && navigator.canShare({files:[f]})) { await navigator.share({files:[f], title:'Budget backup'}); return; } } catch(e){ if (e && e.name === 'AbortError') return; }
     A.backup(); toast('Sharing is not supported here, so the backup was downloaded. Send that file to your other device.'); }
 };
 function guessEnv(note){ if (!note) return null; const n = note.toLowerCase(); const hit = S.spends.slice().reverse().find(s => s.env && s.note && s.note.toLowerCase() === n);
   if (hit) return hit.env; const e = S.envelopes.find(e => n.includes(e.name.toLowerCase()) || e.name.toLowerCase().includes(n)); return e ? e.id : null; }
+function restoreEncrypted(d){
+  modal(`<h2>This backup is protected</h2><div class="small muted">Type the PIN that was used when the backup was made.</div><input class="inp" id="rpin" type="password" inputmode="numeric" maxlength="8" style="margin-top:12px"><div id="rmsg" class="tiny red-t" style="min-height:18px;margin-top:6px"></div>
+    <div class="acts"><button class="btn ghost" data-act="close">Cancel</button><button class="btn gold" id="rgo">Restore</button></div>`);
+  document.getElementById('rgo').onclick = async () => { try { const pin = val('rpin'); const key = await deriveKey(pin, d.salt); const data = JSON.parse(await decryptText(d, key));
+      S = clean(data); S.setupDone = true; S.appWelcomed = true; const m = me(); m.locked = true; m.salt = d.salt; cryptoKey = key; savePeople(); save(); close(); render(); toast('Backup restored and still protected by your PIN.');
+    } catch(e){ document.getElementById('rmsg').textContent = 'That PIN did not open this backup.'; } };
+}
 function dl(blob, name){ const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500); }
 function addSpend(amount, note, env, date){
   if (EDITION === 'demo' && S.spends.length >= DEMO_CAP) return toast(`The demo holds ${DEMO_CAP} spends. Everything you typed stays readable.`);
@@ -1157,10 +1219,10 @@ function example(){
 function onboard(step = 0, draft = {}){
   const steps = [
     () => `<h2>Welcome</h2><div class="muted small">A calm budget that tells you one thing: what is safe to spend today. It is saved on this device only. No account, no bank connection.</div>
-      <div class="acts" style="justify-content:stretch;flex-direction:column"><button class="btn gold" data-ob="example">Explore with example numbers first</button><button class="btn" data-ob="fresh">Start with my own numbers</button><button class="btn ghost" data-ob="restore">I have a backup file</button></div>
+      <div class="acts" style="justify-content:stretch;flex-direction:column">${draft.skipWelcome ? '' : '<button class="btn gold" data-ob="example">Explore with example numbers first</button>'}<button class="btn ${draft.skipWelcome?'gold':''}" data-ob="fresh">Start with my own numbers</button><button class="btn" data-ob="restore">${ico('shield')} Restore my backup (reinstalled or new phone)</button>${people.list.length > 1 ? '<button class="btn ghost" data-ob="who">Back to people</button>' : ''}</div>
       <div class="tiny muted" style="margin-top:14px;text-align:center">Pick your colours any time with the ◐ button.</div>`,
     () => `<div class="steps"><i class="on"></i><i></i><i></i><i></i></div><h2>What is in your account?</h2><div class="muted small">Open your banking app and type the balance of the account you spend from.</div><label class="lbl">Balance today</label><input class="inp" id="o_bal" inputmode="decimal"><label class="lbl">Currency</label><select class="inp" id="o_cur">${CURS.map(c=>`<option>${c}</option>`).join('')}</select>
-      <div class="inl"><div><label class="lbl">Your first name</label><input class="inp" id="o_name"></div><div><label class="lbl">Main goal right now</label><select class="inp" id="o_goal">${GOALS_MAIN.map(g=>`<option value="${g[0]}">${g[1]}</option>`).join('')}</select></div></div>
+      <div class="inl"><div><label class="lbl">Your first name</label><input class="inp" id="o_name" maxlength="40" value="${esc(draft.name || (S && S.name) || '')}"></div><div><label class="lbl">Main goal right now</label><select class="inp" id="o_goal">${GOALS_MAIN.map(g=>`<option value="${g[0]}">${g[1]}</option>`).join('')}</select></div></div>
       <div class="acts"><button class="btn gold" data-ob="n1">Next</button></div>`,
     () => `<div class="steps"><i class="on"></i><i class="on"></i><i></i><i></i></div><h2>Your paycheck</h2><div class="muted small">What usually reaches your account, and how often. You can add more paychecks later.</div><label class="lbl">Amount</label><input class="inp" id="f_amt" inputmode="decimal">${freqFields({freq:'biweekly'},true)}<div class="acts"><button class="btn ghost" data-ob="skip2">I am paid irregularly</button><button class="btn gold" data-ob="n2">Next</button></div>`,
     () => `<div class="steps"><i class="on"></i><i class="on"></i><i class="on"></i><i></i></div><h2>Check your next payday</h2><div class="small" style="margin:12px 0">${(() => { const p = S.paychecks[0]; const n = p ? occ(p, addD(TODAY(),1), addD(TODAY(),120))[0] : null; return n ? 'Your next payday looks like <b class="gold-t">'+nice(n)+'</b>. If that is wrong, go back and change the date.' : 'No payday set. The planner will count to the end of each month.'; })()}</div><div class="acts"><button class="btn ghost" data-ob="back2">Back</button><button class="btn gold" data-ob="n3">Looks right</button></div>`,
@@ -1169,17 +1231,111 @@ function onboard(step = 0, draft = {}){
   document.getElementById('app').innerHTML = `<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px"><div class="brand" style="position:fixed;top:18px;left:22px"><img src="icon-192.png" alt="" style="width:40px;height:40px;border-radius:11px"><div><b>Budget Planner</b><small>by SheetsInGold</small></div></div></div>`;
   modal(steps[step]()); if (step === 2) freqShow();
   document.getElementById('modal').onclick = e => { const b = e.target.closest('[data-ob]'); if (!b) return; const o = b.dataset.ob;
-    if (o === 'example'){ S = example(); save(); close(); render(); toast('These are made-up numbers. Start your own file in Settings any time.'); }
-    else if (o === 'fresh'){ S = blank(); onboard(1); }
-    else if (o === 'restore'){ S = blank(); render(); view = 'settings'; render(); close(); A.restore(); }
-    else if (o === 'n1'){ S.balanceTs = Date.now(); S.balance = num('o_bal'); S.cur = val('o_cur'); S.name = val('o_name'); S.profile = Object.assign(S.profile||{}, {goal: val('o_goal')}); S.balanceDate = TODAY(); S.start = TODAY(); save(); onboard(2); }
-    else if (o === 'n2'){ const p = readFreq({id:uid(), name:'My paycheck', amount:num('f_amt')}); S.paychecks = [p]; save(); onboard(3); }
-    else if (o === 'skip2'){ S.paychecks = [{id:uid(), name:'Irregular income', freq:'irregular', amount:0}]; save(); onboard(3); }
-    else if (o === 'back2'){ onboard(2); }
-    else if (o === 'n3'){ onboard(4); }
+    if (o === 'example'){ S = example(); save(); close(); render(); welcomeApp(); toast('These are made-up numbers. Start your own file in Settings any time.'); }
+    else if (o === 'fresh'){ const th = S && S.theme; S = blank(); if (th) S.theme = th; if (draft.skipWelcome) S.appWelcomed = true; onboard(1, draft); }
+    else if (o === 'who'){ close(); whoScreen(); }
+    else if (o === 'restore'){ S = blank(); S.setupDone = false; view = 'settings'; render(); close(); A.restore(); }
+    else if (o === 'n1'){ S.balanceTs = Date.now(); S.balance = num('o_bal'); S.cur = val('o_cur'); S.name = val('o_name'); S.profile = Object.assign(S.profile||{}, {goal: val('o_goal')}); S.balanceDate = TODAY(); S.start = TODAY(); save(); onboard(2, draft); }
+    else if (o === 'n2'){ const p = readFreq({id:uid(), name:'My paycheck', amount:num('f_amt')}); S.paychecks = [p]; save(); onboard(3, draft); }
+    else if (o === 'skip2'){ S.paychecks = [{id:uid(), name:'Irregular income', freq:'irregular', amount:0}]; save(); onboard(3, draft); }
+    else if (o === 'back2'){ onboard(2, draft); }
+    else if (o === 'n3'){ onboard(4, draft); }
     else if (o === 'n4' || o === 'done'){ if (o === 'n4' && val('f_name')) S.bills.push({id:uid(), name:val('f_name'), amount:num('f_bamt'), freq:'monthly', day:Math.max(1,Math.min(31,num('f_bday')||1)), paid:{}});
-      S.setupDone = true; S.lastOpenPrev = TODAY(); save(); close(); document.getElementById('modal').onclick = null; view = 'today'; render(); toast('You are set. This is your safe to spend.'); }
+      S.setupDone = true; S.lastOpenPrev = TODAY(); if (isStandalone()) S.appWelcomed = true; save(); close(); document.getElementById('modal').onclick = null; view = 'today'; render(); abInit(); toast('You are set. This is your safe to spend.'); }
   };
+}
+
+/* ---------- people: pick, lock, unlock ---------- */
+function shell(inner){ close(); document.getElementById('app').innerHTML = `<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px">${inner}</div>`; }
+function personAvatar(x, big){ const init = (x.name||'?').trim().split(/\s+/).map(w => w[0]).join('').slice(0,2).toUpperCase() || '?';
+  return `<div class="avatar ${big?'lg':''}" style="background:${/^#[0-9A-Fa-f]{6}$/.test(x.color||'')?x.color:'var(--gold)'};color:var(--onacc)">${esc(init)}</div>`; }
+function whoScreen(){
+  S = null; cryptoKey = null; document.documentElement.dataset.theme = 'midnight';
+  shell(`<div class="card" style="width:min(560px,100%);text-align:center"><img src="icon-192.png" alt="" style="width:64px;height:64px;border-radius:16px"><h2 class="serif" style="font-size:28px;margin:10px 0 4px">Who is using the planner?</h2>
+    <div class="small muted">Each person has their own planner on this device.</div>
+    <div class="swatches" style="margin-top:18px">${people.list.map(x => `<button class="sw" data-who="${x.id}" style="text-align:center;display:flex;flex-direction:column;align-items:center;gap:8px;padding:16px">${personAvatar(x, true)}<b>${esc(x.name || 'Unnamed')}</b><small>${x.locked ? '🔒 PIN protected' : 'Open'}</small></button>`).join('')}
+      <button class="sw" data-who="__add" style="text-align:center;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:16px"><div class="avatar lg" style="background:var(--card);color:var(--gold);border-style:dashed">+</div><b>Add a person</b><small>New empty planner</small></button></div></div>`);
+}
+let pinTries = 0, pinWait = 0;
+function lockScreen(id){
+  const x = people.list.find(y => y.id === id) || me(); S = null; cryptoKey = null; document.documentElement.dataset.theme = 'midnight';
+  shell(`<div class="card" style="width:min(420px,100%);text-align:center"><div style="display:flex;justify-content:center">${personAvatar(x, true)}</div><h2 class="serif" style="font-size:26px;margin:12px 0 4px">${esc(x.name || 'Your planner')}</h2>
+    <div class="small muted">This planner is locked with a PIN.</div>
+    <input class="inp" id="pinIn" type="password" inputmode="numeric" autocomplete="off" maxlength="8" placeholder="Enter PIN" style="text-align:center;font-size:24px;letter-spacing:8px;margin-top:16px">
+    <div id="pinMsg" class="tiny red-t" style="min-height:18px;margin-top:6px"></div>
+    <button class="btn gold" style="width:100%;margin-top:6px" data-unlock="${x.id}">Unlock</button>
+    <div class="chipbar" style="justify-content:center;margin-top:12px">${people.list.length > 1 ? '<button class="btn sm ghost" data-who="__pick">Switch person</button>' : ''}<button class="btn sm ghost" data-who="__forgot">Forgot PIN?</button></div></div>`);
+  setTimeout(() => { const i = document.getElementById('pinIn'); if (i) i.focus(); }, 50);
+}
+async function unlock(id){
+  const x = people.list.find(y => y.id === id); const msg = document.getElementById('pinMsg'); const pin = (document.getElementById('pinIn')||{}).value || '';
+  if (Date.now() < pinWait) { msg.textContent = 'Too many tries. Wait a few seconds.'; return; }
+  if (!/^\d{4,8}$/.test(pin)) { msg.textContent = 'Your PIN is 4 to 8 numbers.'; return; }
+  msg.textContent = 'Unlocking...';
+  try { const key = await deriveKey(pin, x.salt); const raw = localStorage.getItem(keyFor(id)); const d = raw ? JSON.parse(await decryptText(raw, key)) : null;
+    people.active = id; savePeople(); cryptoKey = key; pinTries = 0; S = d ? clean(d) : null; afterOpen();
+  } catch(e){ pinTries++; if (pinTries >= 5) { pinWait = Date.now() + 30000; pinTries = 0; } msg.textContent = 'That PIN did not work.'; const i = document.getElementById('pinIn'); if (i) { i.value = ''; i.focus(); } }
+}
+function openPerson(id){
+  const x = people.list.find(y => y.id === id); if (!x) return whoScreen(); people.active = id; savePeople(); cryptoKey = null;
+  if (x.locked && isEncrypted(localStorage.getItem(keyFor(id)) || '')) return lockScreen(id);
+  if (x.locked) { x.locked = false; delete x.salt; savePeople(); }   // PIN set but nothing stored yet
+  S = load(); afterOpen();
+}
+function afterOpen(){ view = 'today'; if (!S || !S.setupDone) { onboard(); return; } S.lastOpenPrev = S.lastOpen || TODAY(); S.lastOpen = TODAY(); save(true); render(); abInit(); welcomeApp(); }
+function lockNow(){ if (!me().locked) return; save(true); setTimeout(() => lockScreen(people.active), 50); }
+document.addEventListener('click', e => {
+  const w = e.target.closest('[data-who]'); const u = e.target.closest('[data-unlock]');
+  if (u) { unlock(u.dataset.unlock); return; }
+  if (!w) return; const id = w.dataset.who;
+  if (id === '__add') return addPerson();
+  if (id === '__pick') return whoScreen();
+  if (id === '__forgot') return modal(`<h2>Forgot your PIN?</h2><div class="small" style="line-height:1.55">Your numbers are encrypted with your PIN, so nobody (not even us) can open them without it. That is what keeps them private.</div>
+      <div class="tip">${ico('shield')}<div>If you have a backup file, you can remove this planner and restore the backup. Otherwise keep trying: after 5 tries there is a short wait.</div></div>
+      <div class="acts"><button class="btn red" data-act="forgetPerson">Remove this planner</button><button class="btn gold" data-act="close">Try again</button></div>`);
+  openPerson(id);
+}, true);
+document.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.id === 'pinIn') { const u = document.querySelector('[data-unlock]'); if (u) unlock(u.dataset.unlock); } });
+function addPerson(){
+  modal(`<h2>Add a person</h2><div class="small muted">They get their own empty planner on this device. Nobody else's numbers are shown to them.</div><label class="lbl">Their name</label><input class="inp" id="np_name" maxlength="40" placeholder="First name">
+    <div class="acts"><button class="btn ghost" data-act="close">Cancel</button><button class="btn gold" data-act="addPersonSave">Create planner</button></div>`);
+}
+/* auto-lock after 5 minutes away */
+let hiddenAt = 0;
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') hiddenAt = Date.now(); else if (S && me().locked && hiddenAt && Date.now() - hiddenAt > 5*60*1000) lockNow(); });
+
+/* ---------- backups: file text, auto-backup (desktop), reminders ---------- */
+async function backupText(){ const data = JSON.stringify(Object.assign({}, S, {kind:'sig-budget'}), null, 1); return me().locked && cryptoKey ? encryptText(data, cryptoKey, me().salt) : data; }
+function markBackedUp(){ if (!S) return; S.lastBackup = TODAY(); save(true); }
+const FSA = typeof window.showSaveFilePicker === 'function';
+let abHandle = null, abState = 'off', abTimer = null;
+function idb(){ return new Promise((res, rej) => { const r = indexedDB.open('sig-budget', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+async function idbGet(k){ const db = await idb(); return new Promise(res => { const q = db.transaction('kv').objectStore('kv').get(k); q.onsuccess = () => res(q.result); q.onerror = () => res(null); }); }
+async function idbSet(k, v){ const db = await idb(); return new Promise(res => { const t = db.transaction('kv','readwrite'); v === undefined ? t.objectStore('kv').delete(k) : t.objectStore('kv').put(v, k); t.oncomplete = () => res(true); t.onerror = () => res(false); }); }
+async function abInit(){ if (!FSA) return; try { abHandle = await idbGet('ab:' + people.active); if (!abHandle) { abState = 'off'; return; } const p = await abHandle.queryPermission({mode:'readwrite'}); abState = p === 'granted' ? 'on' : 'paused'; if (view === 'today' || view === 'settings') render(); } catch(e){ abState = 'off'; } }
+async function abOn(){ try { const nm = (S.name || 'my').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'') || 'my';
+    abHandle = await showSaveFilePicker({suggestedName:`budget-planner-${nm}-backup.json`, types:[{description:'Budget Planner backup', accept:{'application/json':['.json']}}]});
+    await idbSet('ab:' + people.active, abHandle); abState = 'on'; await abWrite(); render(); toast('Auto-backup is on. Every change is saved to that file.'); } catch(e){ if (e && e.name !== 'AbortError') toast('Auto-backup could not start here. Use Download a backup instead.'); } }
+async function abResume(){ try { const p = await abHandle.requestPermission({mode:'readwrite'}); abState = p === 'granted' ? 'on' : 'paused'; if (abState === 'on') await abWrite(); render(); } catch(e){} }
+async function abOff(){ await idbSet('ab:' + people.active, undefined); abHandle = null; abState = 'off'; render(); toast('Auto-backup turned off. Your file is still where you saved it.'); }
+function autoBackupSoon(){ if (abState !== 'on') return; clearTimeout(abTimer); abTimer = setTimeout(abWrite, 1500); }
+async function abWrite(){ if (!abHandle || !S) return; try { const w = await abHandle.createWritable(); await w.write(await backupText()); await w.close(); markBackedUp(); } catch(e){ abState = 'paused'; } }
+function backupCard(){
+  if (!S || S.example) return '';
+  if (abState === 'on') return '';
+  if (abState === 'paused') return `<div class="install hide-focus">${ico('shield')}<div class="grow"><b>Auto-backup is paused</b><div class="tiny muted">Your browser asks again after a restart. One click and it carries on saving.</div></div><button class="btn gold" data-act="abResume">Turn it back on</button></div>`;
+  const has = S.spends.length + S.bills.length + S.goals.length > 3, age = S.lastBackup ? diff(TODAY(), S.lastBackup) : 999;
+  if (!has || age < 7 || (S.backupSnooze && diff(TODAY(), S.backupSnooze) < 3)) return '';
+  return `<div class="install hide-focus">${ico('shield')}<div class="grow"><b>Keep your numbers safe</b><div class="tiny muted">${S.lastBackup ? 'Last backup '+age+' days ago.' : 'No backup yet.'} If this app is ever removed or the phone is changed, a backup brings everything back.</div></div>
+    ${FSA ? '<button class="btn gold" data-act="abOn">Turn on auto-backup</button>' : '<button class="btn gold" data-act="shareBackup">Save a backup</button>'}<button class="btn sm ghost" data-act="backupLater">Not now</button></div>`;
+}
+/* ---------- first launch of the installed app: ask the name ---------- */
+function welcomeApp(){
+  if (!S || !isStandalone() || S.appWelcomed) return;
+  modal(`<div style="display:flex;gap:14px;align-items:center"><img src="icon-192.png" alt="" style="width:60px;height:60px;border-radius:15px"><div><h2 style="margin:0">Welcome to your app</h2><div class="tiny muted">Budget Planner is installed on this device.</div></div></div>
+    <label class="lbl">What should we call you?</label><input class="inp" id="wa_name" maxlength="40" value="${S.example ? '' : esc(S.name||'')}" placeholder="Your first name">
+    ${S.example ? '<div class="tip">'+ico('spark')+'<div>You are looking at <b>example numbers</b>. Start your own planner now, or keep exploring and start later from Settings.</div></div>' : ''}
+    <div class="acts">${S.example ? '<button class="btn" data-act="waFresh">Start my own planner</button>' : ''}<button class="btn gold" data-act="waSave">${S.example ? 'Keep exploring' : 'Save'}</button></div>`);
 }
 
 /* ---------- keep the screen current (new day, new greeting) ---------- */
@@ -1194,11 +1350,13 @@ keepStorage();
 
 /* ---------- boot ---------- */
 const QS = new URLSearchParams(location.search);
-if (QS.has('example') && (!S || !S.setupDone)) { S = example(); if (QS.get('theme')) S.theme = QS.get('theme'); save(); }   // never overwrites a real planner
+if (QS.has('example') && !localStorage.getItem(keyFor(people.active)) && !me().locked) { S = example(); if (QS.get('theme')) S.theme = QS.get('theme'); save(true); }   // never overwrites a real planner
 if (QS.get('view')) view = QS.get('view');
 const GO_LOG = QS.get('go') === 'log';
-if (!S || !S.setupDone) onboard();
-else { S.lastOpenPrev = S.lastOpen || TODAY(); S.lastOpen = TODAY(); save(); render(); if (GO_LOG) A.logModal(); }
+if (people.list.length > 1 && !QS.has('example')) whoScreen();
+else if (me().locked && isEncrypted(localStorage.getItem(keyFor(people.active)) || '')) lockScreen(people.active);
+else if (!S || !S.setupDone) onboard();
+else { afterOpen(); if (GO_LOG) A.logModal(); }
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(()=>{});
 </script>
 </body>
