@@ -1,13 +1,28 @@
 {
+ "id": "./",
  "name": "SheetsInGold Budget App",
  "short_name": "Budget",
- "start_url": "./",
+ "description": "A calm budget planner: what is safe to spend today, bills, paychecks, goals and debt. Works offline, no account.",
+ "start_url": "./?source=app",
  "scope": "./",
  "display": "standalone",
+ "orientation": "any",
  "background_color": "#0E1624",
  "theme_color": "#0E1624",
+ "categories": ["finance", "productivity"],
  "icons": [
-  {"src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
-  {"src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
+  {"src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+  {"src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+  {"src": "icon-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable"},
+  {"src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+ ],
+ "shortcuts": [
+  {"name": "Log a spend", "short_name": "Log", "url": "./?go=log", "icons": [{"src": "icon-192.png", "sizes": "192x192"}]},
+  {"name": "Must-pays", "short_name": "Bills", "url": "./?view=bills", "icons": [{"src": "icon-192.png", "sizes": "192x192"}]},
+  {"name": "Month", "short_name": "Month", "url": "./?view=month", "icons": [{"src": "icon-192.png", "sizes": "192x192"}]}
+ ],
+ "screenshots": [
+  {"src": "screen-wide.png", "sizes": "1440x900", "type": "image/png", "form_factor": "wide", "label": "Safe to spend today"},
+  {"src": "screen-narrow.png", "sizes": "540x1080", "type": "image/png", "form_factor": "narrow", "label": "Your budget on your phone"}
  ]
 }

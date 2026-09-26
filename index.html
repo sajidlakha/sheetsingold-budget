@@ -9,8 +9,12 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Budget">
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="icon" href="icon-192.png">
-<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="application-name" content="Budget">
+<meta name="description" content="SheetsInGold Budget App: what is safe to spend today, bills, paychecks, goals and debt. Offline, no account.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
@@ -137,6 +141,8 @@ button,input,select,textarea{font:inherit;color:inherit}
  .bnav button{background:none;border:0;display:flex;flex-direction:column;align-items:center;gap:3px;font-size:10.5px;font-weight:700;color:var(--muted);cursor:pointer;flex:1}
  .bnav button .ic{font-size:19px}.bnav button.on{color:var(--gold)}
  .bnav .plus{background:var(--gold);color:var(--onacc);border-radius:50%;width:50px;height:50px;flex:0 0 50px;margin-top:-22px;box-shadow:var(--shadow);font-size:26px;font-weight:800;justify-content:center}
+ .install{flex-wrap:wrap;gap:10px 12px}.install .grow{flex:1 1 170px}.install img{width:44px;height:44px;flex-basis:44px}
+ .top .chipbar{gap:6px}.top .chipbar .btn{padding:8px 11px;font-size:12px}
  .cal{gap:4px}.cal .c{min-height:58px;padding:4px;border-radius:9px}.cal .h{font-size:9.5px;letter-spacing:0}.card{padding:16px}.g4.keep{gap:12px}.kpi .v{font-size:23px}.cal .ev{font-size:0;height:6px;padding:0}.cal .ev.s{display:none}
 }
 .swatches{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:10px;margin-top:8px}
@@ -176,6 +182,12 @@ button,input,select,textarea{font:inherit;color:inherit}
 .illus{display:flex;flex-direction:column;align-items:center;gap:10px}.illus svg{width:74px;height:74px;color:var(--gold);opacity:.85}
 body.priv .amt,body.priv .big,body.priv .kpi .v,body.priv .pp b,body.priv .expl b,body.priv .ev.p,body.priv .verdict b{filter:blur(7px)}
 body.priv .amt:hover{filter:none}
+.install{display:flex;gap:14px;align-items:center;background:linear-gradient(135deg,var(--goldbg),transparent);border:1px solid var(--gold);border-radius:18px;padding:14px 16px;margin-bottom:18px}
+.install img{width:52px;height:52px;border-radius:13px;flex:0 0 52px;box-shadow:0 6px 16px rgba(0,0,0,.25)}
+.ios-steps{counter-reset:st;margin-top:10px}.ios-steps div{position:relative;padding:12px 0 12px 42px;border-bottom:1px solid var(--line);font-size:14px;line-height:1.5}
+.ios-steps div:before{counter-increment:st;content:counter(st);position:absolute;left:0;top:10px;width:28px;height:28px;border-radius:50%;background:var(--gold);color:var(--onacc);font-weight:800;display:flex;align-items:center;justify-content:center}
+.ios-steps svg{width:20px;height:20px;vertical-align:-4px;color:var(--blue);display:inline-block}
+.side .inst{margin-top:8px;background:none;border:1px solid var(--gold);color:var(--gold);border-radius:12px;padding:10px;font-weight:800;cursor:pointer;display:flex;gap:8px;align-items:center;justify-content:center}
 </style>
 </head>
 <body>
@@ -291,6 +303,21 @@ function calc(t = TODAY()){
   const daily = (safe + spentToday) / days;
   return {t, np, end, days, now, pays, inc, spent, paidOut, extraDebt, owed, mustPay, setAside, goals, buffer, safe, spentToday, daily, today: daily - spentToday};
 }
+
+/* ---------- install as an app ---------- */
+let deferredPrompt = null;
+const isStandalone = () => matchMedia('(display-mode: standalone)').matches || matchMedia('(display-mode: window-controls-overlay)').matches || navigator.standalone === true;
+const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const inAppBrowser = () => /FBAN|FBAV|Instagram|Etsy|Line\/|Pinterest|TikTok/i.test(navigator.userAgent);
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferredPrompt = e; if (S && S.setupDone) render(); });
+window.addEventListener('appinstalled', () => { deferredPrompt = null; if (S) { S.installed = true; save(); render(); } toast('Installed. Look for the Budget icon on your home screen or desktop.'); });
+function canOfferInstall(){ return !isStandalone() && !(S && S.installed && !deferredPrompt); }
+function installCard(){
+  if (!canOfferInstall() || (S.installHide && diff(TODAY(), S.installHide) < 14)) return '';
+  return `<div class="install hide-focus"><img src="icon-192.png" alt=""><div class="grow"><b>Put Budget on your ${isIOS()||/android/i.test(navigator.userAgent)?'home screen':'desktop'}</b><div class="tiny muted" style="margin-top:3px">Opens like a real app, works offline and keeps your numbers safer.</div></div><button class="btn gold" data-act="install">Install</button><button class="btn sm ghost" data-act="installLater">Later</button></div>`;
+}
+const SHARE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M8 7l4-4 4 4"/><path d="M5 11v8a2 2 0 002 2h10a2 2 0 002-2v-8"/></svg>';
+const ADD_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M12 8v8M8 12h8"/></svg>';
 
 /* ---------- icons (own simple line set) ---------- */
 const IC = {
@@ -409,6 +436,7 @@ function render(){
     <div class="brand" data-go="settings" style="cursor:pointer">${avatarHTML()}<div><b>${esc(S.title||'My money plan')}</b><small>${esc(S.name||'SheetsInGold Budget')}</small></div></div>
     ${NAV.map(n => `<button class="nav ${view===n[0]?'on':''}" data-go="${n[0]}"><span class="ic">${ico(n[2])}</span>${n[1]}</button>`).join('')}
     <div class="grow"></div>
+    ${canOfferInstall() ? `<button class="inst" data-act="install">${ico('plus')} Install app</button>` : ''}
     <button class="log" data-act="logModal">+ Log a spend</button>
   </aside>
   <main class="main ${focus?'focus':''}">${V()}</main>
@@ -430,7 +458,8 @@ function vToday(){
   const todays = S.spends.filter(s => s.date === t).slice().reverse();
   const next = nextThing(c);
   const away = diff(t, S.lastOpenPrev || t) >= 7;
-  return `${head(greet(), nice(t)+' · '+esc(S.title||''), `<button class="btn hide-focus" data-act="afford">${ico('spark')} Can I afford it?</button><button class="btn" data-act="privacy" title="Hide amounts">${ico((S.profile||{}).privacy?'eyeoff':'eye')}</button><button class="btn" data-act="themeModal" title="Colour theme">${ico('theme')}</button><button class="btn ${focus?'gold':''}" data-act="focus">${focus?'Show everything':'Focus mode'}</button>`)}
+  return `${head(greet(), nice(t)+' · '+esc(S.title||''), `<button class="btn hide-focus" data-act="afford">${ico('spark')} Can I afford it?</button><button class="btn" data-act="privacy" title="Hide amounts">${ico((S.profile||{}).privacy?'eyeoff':'eye')}</button><button class="btn" data-act="themeModal" title="Colour theme">${ico('theme')}</button><button class="btn ${focus?'gold':''}" data-act="focus">${focus?'Show all':'Focus'}</button>`)}
+  ${installCard()}
   ${away ? `<div class="card hide-focus" style="margin-bottom:18px;border-color:var(--gold)"><h3>While you were away <button class="btn sm ghost" data-act="dismissAway">Not now</button></h3>
      <div class="small muted" style="margin-bottom:10px">It has been a while. Three quick checks and every number is right again.</div>
      <div class="chipbar"><button class="btn" data-go="bills">1 · Tick bills that went out</button><button class="btn" data-go="money">2 · Check money that came in</button><button class="btn gold" data-act="balanceModal">3 · Type today's balance</button></div></div>` : ''}
@@ -678,6 +707,8 @@ function vSettings(){
       <div class="card"><h3>Keep your numbers safe</h3><div class="tiny muted" style="margin-bottom:12px">On iPhone and iPad, add this planner to your Home Screen first (Share › Add to Home Screen). Download a backup now and then, and you can restore it on any device.</div>
         <div class="chipbar"><button class="btn gold" data-act="backup">Download a backup</button><button class="btn" data-act="shareBackup">Send to my other device</button><button class="btn" data-act="restore">Restore a backup</button><button class="btn" data-act="csv">Export spending (CSV)</button></div><input type="file" id="restoreFile" accept=".json,application/json" style="display:none">
         <div class="tiny muted" style="margin-top:10px">Using a phone and a laptop? Tap "Send to my other device", pick WhatsApp, email or AirDrop, then open the planner there and choose Restore.</div></div>
+      <div class="card"><h3>Use it like an app</h3><div style="display:flex;gap:14px;align-items:center"><img src="icon-192.png" alt="" style="width:56px;height:56px;border-radius:14px"><div class="tiny muted">${isStandalone() ? 'You are using the installed app. 🎉 It opens from your home screen or desktop and works offline.' : 'Install Budget on your phone and your computer. It gets its own icon, opens in its own window and works offline.'}</div></div>
+        ${isStandalone() ? '' : `<div class="chipbar" style="margin-top:12px"><button class="btn gold" data-act="install">Install app</button><button class="btn" data-act="installHelp">How to install</button></div>`}</div>
       <div class="card"><h3>Bill reminders on your phone</h3><div class="tiny muted" style="margin-bottom:12px">Download one calendar file with every bill and payday. Open it on your phone and they appear in your own calendar, with a reminder the day before each bill. Nothing is sent anywhere.</div><button class="btn gold" data-act="ics">Add reminders to my calendar</button></div>
       <div class="card"><h3>Start again</h3><div class="chipbar"><button class="btn" data-act="exampleAgain">Show the example</button><button class="btn red" data-act="erase">Erase everything</button></div></div>
     </div>
@@ -805,6 +836,19 @@ const A = {
   exampleAgain(){ if (!confirm('Replace your numbers with the example? Download a backup first if you want to keep them.')) return; S = example(); save(); view = 'today'; render(); },
   erase(){ if (!confirm('Erase everything on this device? This cannot be undone unless you have a backup.')) return; localStorage.removeItem(KEY); S = null; onboard(); },
   close(){ close(); },
+  async install(){ if (deferredPrompt) { deferredPrompt.prompt(); const r = await deferredPrompt.userChoice.catch(() => null); deferredPrompt = null; if (r && r.outcome === 'accepted') { S.installed = true; save(); } render(); return; } A.installHelp(); },
+  installLater(){ S.installHide = TODAY(); save(); render(); },
+  installHelp(){
+    let body;
+    if (inAppBrowser()) body = `<div class="verdict m">You are inside another app's browser (like Etsy or Instagram). Tap the <b>⋯</b> menu and choose <b>Open in Safari</b> or <b>Open in Chrome</b> first, then come back to this screen.</div>`;
+    else if (isIOS()) body = `<div class="muted small">iPhone and iPad install web apps from Safari. It takes 10 seconds.</div><div class="ios-steps">
+        <div>Open this page in <b>Safari</b></div><div>Tap the <b>Share</b> button ${SHARE_ICON} at the bottom (or top on iPad)</div>
+        <div>Scroll and tap <b>Add to Home Screen</b> ${ADD_ICON}</div><div>Tap <b>Add</b>. The gold <b>Budget</b> icon appears on your home screen</div></div>
+        <div class="tip">${ico('shield')}<div>Open Budget from the icon from now on. On iPhone this also keeps your numbers from being cleared by Safari.</div></div>`;
+    else if (/android/i.test(navigator.userAgent)) body = `<div class="ios-steps"><div>Open this page in <b>Chrome</b></div><div>Tap the <b>⋮</b> menu at the top right</div><div>Tap <b>Install app</b> (or <b>Add to Home screen</b>)</div><div>Tap <b>Install</b>. The Budget icon appears with your other apps</div></div>`;
+    else body = `<div class="ios-steps"><div><b>Chrome or Edge:</b> click the install icon ${ADD_ICON} at the right end of the address bar, or the menu › <b>Install Budget</b> (Edge: <b>Apps › Install this site as an app</b>)</div>
+        <div>Click <b>Install</b>. Budget gets a desktop icon, a Start menu or Dock entry and its own window</div><div><b>Safari on Mac:</b> File › <b>Add to Dock</b></div></div>`;
+    modal(`<div style="display:flex;gap:14px;align-items:center"><img src="icon-192.png" alt="" style="width:60px;height:60px;border-radius:15px"><div><h2 style="margin:0">Install Budget</h2><div class="tiny muted">Your own app icon, works offline, no app store needed</div></div></div>${body}<div class="acts"><button class="btn gold" data-act="close">Got it</button></div>`); },
   privacy(){ S.profile = S.profile || {}; S.profile.privacy = !S.profile.privacy; save(); render(); toast(S.profile.privacy ? 'Amounts hidden. Hover or tap the eye to show them again.' : 'Amounts showing.'); },
   pick(el){ S.profile = S.profile || {}; const f = el.dataset.f, v = el.dataset.v; S.profile[f] = v === '1' ? true : v === '' ? false : v; if (document.getElementById('s_name')) { S.name = val('s_name') || S.name; S.title = val('s_title') || S.title; S.profile.bio = val('s_bio'); } save(); render(); },
   avColor(el){ S.profile = S.profile || {}; S.profile.color = el.dataset.v; save(); render(); },
@@ -1014,8 +1058,9 @@ function onboard(step = 0, draft = {}){
 const QS = new URLSearchParams(location.search);
 if (QS.has('example') && (!S || !S.setupDone)) { S = example(); if (QS.get('theme')) S.theme = QS.get('theme'); save(); }   // never overwrites a real planner
 if (QS.get('view')) view = QS.get('view');
+const GO_LOG = QS.get('go') === 'log';
 if (!S || !S.setupDone) onboard();
-else { S.lastOpenPrev = S.lastOpen || TODAY(); S.lastOpen = TODAY(); save(); render(); }
+else { S.lastOpenPrev = S.lastOpen || TODAY(); S.lastOpen = TODAY(); save(); render(); if (GO_LOG) A.logModal(); }
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(()=>{});
 </script>
 </body>
