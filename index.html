@@ -323,6 +323,10 @@ html[data-contrast=high]{--muted:var(--text);--line:var(--gold)}html[data-contra
 .bdg .be{font-size:34px;line-height:1.1;margin-bottom:2px}.bdg b{font-size:13px}.bdg small{font-size:11px;color:var(--muted);line-height:1.35}
 .newbadge{text-align:center;padding:6px 0}.newbadge .be{font-size:84px;line-height:1.1;margin:10px 0}.gemo{font-size:22px;margin-right:6px}
 .fc .dl{line-height:1.15;text-align:center}
+.leak{background:var(--card2);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin-top:10px}
+.leak .big2{font-family:'Playfair Display',Georgia,serif;font-size:34px;font-weight:700}
+.pz{display:flex;gap:12px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)}.pz:last-child{border:0}.pz .grow{flex:1;min-width:0}
+.pz .clock{width:44px;height:44px;border-radius:50%;background:var(--goldbg);display:flex;align-items:center;justify-content:center;font-size:22px;flex:0 0 44px}
 </style>
 </head>
 <body>
@@ -385,7 +389,8 @@ function blank(){
     debtOrder:'rate', debtExtraMonthly:0, lastOpen:TODAY(), setupDone:false, example:false, quick:[5,10,20,50], dump:[], wins:[], mdate:{}, accounts:[], profile:{goal:'', household:'', week:'Monday', privacy:false, calm:false, color:'', avatar:'', bio:''}};
 }
 function clean(d){ const b = blank(), o = Object.assign(b, d);
-  ['paychecks','bills','spends','income','goals','debts','debtExtra','envelopes','dump','wins','accounts'].forEach(k => { if (!Array.isArray(o[k])) o[k] = []; });
+  ['paychecks','bills','spends','income','goals','debts','debtExtra','envelopes','dump','wins','accounts','pause'].forEach(k => { if (!Array.isArray(o[k])) o[k] = []; });
+  o.pause = o.pause.filter(x => x && x.id && /^\d{4}-\d{2}-\d{2}$/.test(x.date||'')).map(x => ({id:String(x.id), name:String(x.name||'Something').slice(0,60), price:Math.max(0,+x.price||0), why:String(x.why||'').slice(0,120), date:x.date})); o.letGo = Math.max(0, +o.letGo || 0);
   if (!['md','lg','xl'].includes(o.profile && o.profile.size)) { if (o.profile) o.profile.size = 'md'; }
   ['notes','payOverride','mdate'].forEach(k => { if (!o[k] || typeof o[k] !== 'object' || Array.isArray(o[k])) o[k] = {}; });
   o.profile = Object.assign(blank().profile, o.profile && typeof o.profile === 'object' ? o.profile : {});
@@ -1114,7 +1119,29 @@ const A = {
   afford(){ modal(`<h2>Can I afford it?</h2><div class="muted small">Type the price. The planner checks it against today, your payday and the bills in between.</div>
     <div class="inl"><div><label class="lbl">Price</label><input class="inp" id="af_amt" inputmode="decimal"></div><div><label class="lbl">What is it? (optional)</label><input class="inp" id="af_name" placeholder="New shoes"></div></div>
     <div id="af_out"></div><div class="acts"><button class="btn ghost" data-act="close">Close</button><button class="btn gold" data-act="affordCheck">Check</button></div>`); },
-  affordCheck(){ const amt = num('af_amt'); if (!(amt > 0)) return toast('Type a price first.'); document.getElementById('af_out').innerHTML = affordVerdict(amt, val('af_name')); },
+  affordCheck(){ const amt = num('af_amt'); if (!(amt > 0)) return toast('Type a price first.'); document.getElementById('af_out').innerHTML = affordVerdict(amt, val('af_name')) + `<div class="acts" style="justify-content:flex-start;margin-top:8px"><button class="btn" data-act="pauseFromAfford">⏸️ Wait 48 hours first</button></div>`; },
+  pauseFromAfford(){ const amt = num('af_amt'), nm = val('af_name'); close(); A.pauseModal(null, {name:nm, price:amt}); },
+  pauseModal(el, pre){ const x = pre || {}; modal(`<h2>⏸️ Purchase pause</h2><div class="small muted" style="line-height:1.5">Want something? Give it 48 hours. If you still want it after that, it is probably a good buy. If not, you just kept that money.</div>
+    <div class="inl"><div><label class="lbl">What is it?</label><input class="inp" id="pz_name" maxlength="60" value="${esc(x.name||'')}" placeholder="New trainers"></div><div><label class="lbl">Price</label><input class="inp" id="pz_price" inputmode="decimal" value="${x.price||''}"></div></div>
+    <label class="lbl">Why do I want it? (optional)</label><input class="inp" id="pz_why" maxlength="120" placeholder="Mine are worn out / saw an advert">
+    <div class="acts"><button class="btn ghost" data-act="close">Cancel</button><button class="btn gold" data-act="pauseSave">Start the 48 hours</button></div>`); },
+  pauseSave(){ const price = num('pz_price'); if (!(price > 0)) return toast('Type the price first.'); S.pause.push({id:uid(), name:val('pz_name') || 'Something I want', price, why:val('pz_why'), date:TODAY()}); save(); close(); render(); toast('⏸️ Paused. Come back in 48 hours and decide.'); },
+  pauseDo(el){ const x = S.pause.find(p => p.id === el.dataset.id); if (!x) return; const how = el.dataset.v, snap = snapshot(); S.pause = S.pause.filter(p => p.id !== x.id);
+    if (how === 'go') { S.letGo = (+S.letGo||0) + x.price; save(); render(); confetti(); toast('🧘 Let it go. You kept ' + money(x.price,2) + '.', () => restoreSnap(snap)); }
+    else if (how === 'buy') { save(); addSpend(x.price, x.name, null, TODAY()); }
+    else if (how === 'save') { S.goals.push({id:uid(), name:x.name, target:x.price, saved:0, monthly:Math.max(10, Math.round(x.price/4)), inSafe:true}); save(); view = 'goals'; render(); toast('🎯 Added as a goal.', () => restoreSnap(snap)); }
+    else { S.pause.push(Object.assign(x, {date:TODAY()})); save(); render(); toast('Paused for another 48 hours.'); } },
+  leakMine(){ const rows = S.spends.map(s => ({date:s.date, amount:-s.amount, note:s.note||''})); leakReport(rows, 'what you logged'); },
+  leakFile(){ const f = document.createElement('input'); f.type = 'file'; f.accept = '.csv,text/csv,.txt'; f.onchange = () => { const file = f.files[0]; if (!file) return; if (file.size > 5e6) return toast('That file is too big. Export a shorter date range.');
+      const r = new FileReader(); r.onload = () => { const all = parseCSV(String(r.result)); if (all.length < 2) return toast('That file has no rows we can read.');
+        let hi = all.findIndex(row => row.filter(c => /date|amount|desc|debit|credit/i.test(c)).length >= 2); if (hi < 0) hi = 0;
+        const head = all[hi], rows = all.slice(hi + 1).filter(row => row.length >= 2), c = guessCols(head, rows);
+        const out = rows.map(x => { const date = parseDateAny(x[c.date], c.order); let a; if (c.amt >= 0) a = parseMoney(x[c.amt]); else { const d = parseMoney(x[c.debit]), cr = parseMoney(x[c.credit]); a = (!isNaN(cr) && cr ? Math.abs(cr) : 0) - (!isNaN(d) && d ? Math.abs(d) : 0); }
+          return {date, amount:a, note:String(x[c.desc]||'').replace(/\s+/g,' ').trim().slice(0,60)}; }).filter(x => x.date && !isNaN(x.amount) && x.amount !== 0);
+        const negs = out.filter(x => x.amount < 0).length; if (negs < out.length * .2) out.forEach(x => x.amount = -x.amount);   // banks that show spending as plus numbers
+        leakReport(out, 'your bank file'); }; r.readAsText(file); }; f.click(); },
+  leakAddBill(el){ const nm = el.dataset.n, amt = +el.dataset.v, per = el.dataset.f; S.bills.push({id:uid(), name:nm, amount:amt, freq:per === 'w' ? 'weekly' : per === 'y' ? 'months' : 'monthly', every:12, day:pd(el.dataset.d).getDate(), anchor:addD(el.dataset.d, per === 'w' ? 7 : 0), category:'Fun', sub:true, paid:{}});
+    save(); el.disabled = true; el.textContent = 'Added ✓'; toast('Added to Bills as a subscription.'); },
   affordGoal(el){ const amt = +el.dataset.v, name = el.dataset.n || 'Something I want'; const f = freePerPaycheck(); S.goals.push({id:uid(), name, target:amt, saved:0, monthly:Math.max(10, Math.round(Math.min(amt/3, Math.max(0,f.perMonth)*0.5))), inSafe:true}); save(); close(); view = 'goals'; render(); toast('Added as a goal. It fills up a little every month.'); },
   dumpDel(el){ S.dump = S.dump.filter(d => d.id !== el.dataset.id); save(); render(); },
   md(el){ const k = el.dataset.k, w = weekKey(); S.mdate = S.mdate && S.mdate.w === w ? S.mdate : {w, done:{}}; if (S.mdate.done[k]) delete S.mdate.done[k]; else S.mdate.done[k] = true; save(); render();
@@ -1263,7 +1290,8 @@ function badgeList(){
     ['debtfree','🎉','Debt paid off','Pay off a whole debt', S.debts.some(d => d.balance > 0 && debtLeft(d) <= 0.005)],
     ['backup','🔐','Backed up','Save a backup of your planner', !!S.lastBackup],
     ['pin','🔒','Locked and safe','Protect your planner with a PIN', !!(me() && me().locked)],
-    ['app','📲','Installed','Put the planner on your home screen', !!(S.installed || isStandalone())]
+    ['app','📲','Installed','Put the planner on your home screen', !!(S.installed || isStandalone())],
+    ['letgo','🧘','Let it go','Skip something in your purchase pause', (+S.letGo||0) > 0]
   ].map(([id,e,tt,how,got]) => ({id, e, t:tt, how, got:!!got, when:(S.badges||{})[id]}));
 }
 let newBadges = [];
@@ -1281,6 +1309,39 @@ function vBadges(){ const bl = badgeList(), got = bl.filter(b => b.got).length;
   <div class="badges">${bl.map(b => `<div class="bdg ${b.got?'got':''}" title="${esc(b.how)}"><div class="be">${b.e}</div><b>${esc(b.t)}</b><small>${b.got ? (b.when ? nice(b.when) : 'Earned') : esc(b.how)}</small></div>`).join('')}</div>`; }
 function floatUp(el, text){ if (!el) return; const r = el.getBoundingClientRect(), d = document.createElement('div'); d.className = 'floatup'; d.textContent = text;
   d.style.left = (r.left + r.width/2) + 'px'; d.style.top = r.top + 'px'; document.body.appendChild(d); setTimeout(() => d.remove(), 1100); }
+/* ---------- v11: purchase pause + money leak finder ---------- */
+function pauseList(){ const t = TODAY(), L = S.pause || [];
+  const head = (+S.letGo||0) > 0 ? `<div class="tip">${ico('spark')}<div>You have let go of <b>${money(S.letGo,0)}</b> of things you did not really need. That money stayed with you. 🧘</div></div>` : '';
+  if (!L.length) return `<div class="small muted" style="line-height:1.55">Want to buy something? Add it here and wait 48 hours. Most "must have" feelings fade in two days.</div>${head}`;
+  return L.map(x => { const h = Math.max(0, 48 - Math.round((Date.now() - pd(x.date).getTime()) / 36e5)), ready = h <= 0;
+    return `<div class="pz"><div class="clock">${ready ? '✅' : '⏳'}</div><div class="grow"><div class="nm">${esc(x.name)} · ${money(x.price,2)}</div><div class="meta">${ready ? 'Ready to decide' : 'About ' + h + ' hours to go'}${x.why ? ' · ' + esc(x.why) : ''}</div>
+      ${ready ? `<div class="chipbar" style="margin-top:8px"><button class="btn sm gold" data-act="pauseDo" data-id="${x.id}" data-v="go">🧘 Let it go</button><button class="btn sm" data-act="pauseDo" data-id="${x.id}" data-v="save">🎯 Save for it</button><button class="btn sm" data-act="pauseDo" data-id="${x.id}" data-v="buy">🛍️ I bought it</button><button class="btn sm ghost" data-act="pauseDo" data-id="${x.id}" data-v="more">Wait more</button></div>` : `<div class="chipbar" style="margin-top:8px"><button class="btn sm ghost" data-act="pauseDo" data-id="${x.id}" data-v="go">Let it go now</button></div>`}</div></div>`; }).join('') + head; }
+const LEAK_FEE = /\bfee|charge[sd]?\b|overdraft|over-?limit|late payment|penalty|interest charge|atm|cash withdrawal fee|foreign|non-sterling|returned item|unpaid/i;
+function leakName(n){ return String(n||'').toLowerCase().replace(/\d{3,}|[#*]\S*|\b(card|payment|pos|debit|purchase|visa|mastercard|ref|www|com|ltd|inc)\b|[^a-z ]/g,' ').replace(/\s+/g,' ').trim().split(' ').slice(0,3).join(' '); }
+function findLeaks(rows){
+  const out = rows.filter(r => r.amount < 0).map(r => ({date:r.date, amt:Math.round(-r.amount*100)/100, note:r.note, key:leakName(r.note)})).filter(r => r.key);
+  const days = out.length ? Math.max(28, diff(out.map(r => r.date).sort().pop(), out.map(r => r.date).sort()[0]) + 1) : 30;
+  const by = {}; out.forEach(r => { (by[r.key] = by[r.key] || []).push(r); });
+  const subs = [];
+  Object.values(by).forEach(list => { if (list.length < 2 || LEAK_FEE.test(list[0].note)) return; const amts = {}; list.forEach(r => { const k = r.amt.toFixed(2); (amts[k] = amts[k] || []).push(r); });
+    Object.entries(amts).forEach(([a, l]) => { if (l.length < 2) return; l.sort((x,y) => x.date < y.date ? -1 : 1); const gaps = l.slice(1).map((r,i) => diff(r.date, l[i].date)); const g = gaps.reduce((s,x) => s + x, 0) / gaps.length;
+      const per = g >= 5 && g <= 9 ? 'w' : g >= 25 && g <= 35 ? 'm' : g >= 340 && g <= 390 ? 'y' : null; if (!per) return;
+      subs.push({name:l[0].note, amt:+a, per, last:l[l.length-1].date, year:+a * (per === 'w' ? 52 : per === 'm' ? 12 : 1), n:l.length}); }); });
+  const fees = out.filter(r => LEAK_FEE.test(r.note));
+  const dups = []; const seen = {}; out.forEach(r => { const k = r.key + '|' + r.amt.toFixed(2); (seen[k] = seen[k] || []).push(r); });
+  Object.values(seen).forEach(l => { l.sort((x,y) => x.date < y.date ? -1 : 1); for (let i = 1; i < l.length; i++) if (diff(l[i].date, l[i-1].date) <= 1) dups.push(l[i]); });
+  const feeSum = fees.reduce((s,r) => s + r.amt, 0), dupSum = dups.reduce((s,r) => s + r.amt, 0), subYear = subs.reduce((s,x) => s + x.year, 0);
+  return {subs:subs.sort((a,b) => b.year - a.year), fees, dups, subYear, feeYear:feeSum * 365 / days, dupSum, days, total:subYear + feeSum * 365 / days};
+}
+function leakReport(rows, from){
+  const L = findLeaks(rows), known = new Set(allBills().map(b => leakName(b.name)));
+  const perT = {w:'a week', m:'a month', y:'a year'};
+  modal(`<h2>🕵️ Money leaks</h2><div class="small muted">From ${from}: ${rows.length} rows, about ${Math.round(L.days/30.44)||1} month${Math.round(L.days/30.44)>1?'s':''}. Checked on this device only.</div>
+    <div class="leak"><div class="label">Found about</div><div class="big2">${money(L.total,0)} <span class="small muted">a year</span></div><div class="tiny muted">in repeat payments and fees. Worth a look, nothing to feel bad about.</div></div>
+    <div class="leak"><b>🔁 Repeat payments (${L.subs.length}) · ${money(L.subYear,0)} a year</b>${L.subs.length ? L.subs.slice(0,12).map(x => `<div class="row"><div class="grow"><div class="nm">${esc(x.name)}</div><div class="meta">${money(x.amt,2)} ${perT[x.per]} · seen ${x.n} times</div></div><span class="pill gold">${money(x.year,0)}/yr</span>${known.has(leakName(x.name)) ? '<span class="pill green">In Bills</span>' : `<button class="btn sm" data-act="leakAddBill" data-n="${esc(x.name)}" data-v="${x.amt}" data-f="${x.per}" data-d="${x.last}">Add to Bills</button>`}</div>`).join('') : '<div class="small muted" style="margin-top:6px">No repeat payments found. A file with 2 or more months finds more.</div>'}</div>
+    <div class="leak"><b>🧾 Bank fees (${L.fees.length}) · about ${money(L.feeYear,0)} a year</b>${L.fees.length ? L.fees.slice(0,8).map(r => `<div class="row"><div class="grow"><div class="nm">${esc(r.note)}</div><div class="meta">${nice(r.date)}</div></div><div class="amt red-t">${money(r.amt,2)}</div></div>`).join('') : '<div class="small muted" style="margin-top:6px">No fees found. Nice.</div>'}</div>
+    <div class="leak"><b>👯 Possible double charges (${L.dups.length})</b>${L.dups.length ? L.dups.slice(0,8).map(r => `<div class="row"><div class="grow"><div class="nm">${esc(r.note)}</div><div class="meta">${nice(r.date)} · same amount, a day apart</div></div><div class="amt">${money(r.amt,2)}</div></div>`).join('') + '<div class="tiny muted" style="margin-top:6px">These may be fine (two coffees!). If not, ask your bank.</div>' : '<div class="small muted" style="margin-top:6px">None found.</div>'}</div>
+    <div class="acts"><button class="btn gold" data-act="close">Done</button></div>`); }
 function addWin(text){ S.wins = S.wins || []; if (S.wins.some(w => w.text === text)) return false; S.wins.push({id:uid(), date:TODAY(), text}); save(); return true; }
 function checkWins(){
   if (!S || S.example) return; let n = 0;
@@ -1326,6 +1387,9 @@ function vInsights(){
     <div class="card"><h3>Last 8 weeks</h3><div class="hbar">${weeks.map((w,i) => `<div class="d" title="${money(w.v,0)}"><div class="tiny muted">${w.v?money(w.v,0):''}</div><div class="cw"><div class="col ${i===7?'':'b'}" style="height:${Math.max(3,w.v/wmax*100)}%"></div></div><div class="dl">${i===7?'This wk':short(w.a)}</div></div>`).join('')}</div></div>
     <div class="card"><h3>Things you buy often <span class="tiny muted" style="letter-spacing:0;text-transform:none">this month, by note</span></h3>${leaks.length ? leaks.map(l => `<div class="row"><div class="grow"><div class="nm">${esc(l.n)}</div><div class="meta">${l.c} time${l.c>1?'s':''}</div></div><div class="amt">${money(l.v,2)}</div></div>`).join('') + '<div class="tiny muted" style="padding-top:8px">Small repeats add up. Nothing to feel bad about, just good to see.</div>' : '<div class="small muted">Add a short note when you log a spend ("coffee", "takeaway") and your repeat spends show up here.</div>'}</div>
     <div class="card"><h3>Spending limits · this month vs last <span class="tiny muted" style="letter-spacing:0;text-transform:none">same point in the month</span></h3>${envRows.length ? envRows.map(r => `<div style="margin:8px 0"><div style="display:flex;justify-content:space-between" class="small"><b>${esc(r.e.name)}</b><span class="muted">${money(r.a,0)} <span class="tiny">vs ${money(r.b,0)}</span></span></div><div class="bar" style="margin-top:5px"><i style="width:${r.a/emax*100}%"></i></div><div class="bar" style="margin-top:3px;height:5px;opacity:.55"><i style="width:${r.b/emax*100}%;background:var(--muted)"></i></div></div>`).join('') : '<div class="small muted">Add spending limits to compare categories.</div>'}</div>
+    <div class="card"><h3>🕵️ Money leak finder</h3><div class="small muted" style="line-height:1.55">Find forgotten subscriptions, bank fees and double charges in a file from your bank (CSV). The file is read on this device only and never sent anywhere. Nothing is added to your planner unless you choose.</div>
+      <div class="chipbar" style="margin-top:12px"><button class="btn gold" data-act="leakFile">${ico('upload')} Check a bank file</button><button class="btn" data-act="leakMine">Check what I logged</button></div></div>
+    <div class="card"><h3>⏸️ Purchase pause <button class="btn sm" data-act="pauseModal">+ Add</button></h3>${pauseList()}</div>
     <div class="card"><h3>Subscriptions check <button class="btn sm" data-act="billModal">+ Add</button></h3>${subs.length ? subs.map(b => `<div class="row"><div class="grow"><div class="nm">${esc(b.name)}</div><div class="meta">${freqText(b)}</div></div><div class="amt">${money(+b.amount,2)}</div><span class="pill grey">${money((b.freq==='months'?perMonth(b):+b.amount)*12,0)}/yr</span></div>`).join('') + '<div class="tiny muted" style="padding-top:8px">Still using all of these? Cancelling one you forgot about is the easiest raise you will get.</div>' : '<div class="small muted">Tick "This is a subscription" on a bill (streaming, apps, gym) to see what they cost you a year.</div>'}</div>
   </div>`;
 }
@@ -1373,6 +1437,7 @@ function example(){
   const notes = [['Supermarket','e1'],['Coffee','e3'],['Fuel','e2'],['Lunch out','e3'],['Market','e1'],['Cinema','e4']];
   for (let i = 70; i >= 0; i--) { if (i > 0 && (i % 6 === 3)) continue; const d = addD(t, -i); const n = i === 0 ? 2 : 1 + (i % 2); for (let k = 0; k < n; k++){ const [note, env] = notes[(i*3+k) % notes.length]; const base = {e1:31,e2:27,e3:8,e4:12}[env]; s.spends.push({id:uid(), date:d, amount:Math.round(base*(0.7+((i*7+k*3)%10)/12)*100)/100, note, env}); } }
   s.income = [{id:uid(), date:addD(t,-5), amount:60, note:'Refund'}];
+  s.pause = [{id:'pz1', name:'Wireless headphones', price:129, why:'Saw an advert', date:addD(t,-3)}, {id:'pz2', name:'New trainers', price:85, why:'', date:t}]; s.letGo = 212;
   s.debtExtraMonthly = 50; s.wins = [{id:'w1', date:addD(t,-20), text:'Every bill paid in '+MONL[(pd(t).getMonth()+11)%12]}, {id:'w2', date:addD(t,-9), text:'Weekly check-in done for the week of '+short(addD(weekStart(t),-7))}]; s.dump = [{id:'b1', text:'Ask landlord about the lease renewal', date:t}]; s.lastOpenPrev = t; return s;
 }
 function onboard(step = 0, draft = {}){
@@ -1581,6 +1646,9 @@ if (S && S.example && QS.get('show')) setTimeout(() => { const w = QS.get('show'
   if (w === 'who') { people.list.push({id:'demo2', name:'Ayesha', color:'#7C63C9', locked:true}, {id:'demo3', name:'Omar', color:'#4E8B6E', locked:false}); whoScreen(); }
   if (w === 'install') A.installHelp();
   if (w === 'pin') A.pinModal();
+  if (w === 'leak') { const r = [], t0 = TODAY(); for (let k = 0; k < 4; k++) { const d = addD(t0, -30*k - 3); r.push({date:d, amount:-15.99, note:'NETFLIX.COM'}, {date:addD(d,2), amount:-10.99, note:'SPOTIFY P1234'}, {date:addD(d,5), amount:-39.99, note:'PURE GYM LTD'}, {date:addD(d,8), amount:-4.99, note:'APPLE.COM/BILL'}, {date:addD(d,11), amount:-7.99, note:'AUDIBLE UK'}); }
+    r.push({date:addD(t0,-20), amount:-25, note:'OVERDRAFT FEE'}, {date:addD(t0,-51), amount:-12, note:'LATE PAYMENT FEE'}, {date:addD(t0,-9), amount:-2.99, note:'NON-STERLING TRANSACTION FEE'}, {date:addD(t0,-14), amount:-23.40, note:'DELIVEROO'}, {date:addD(t0,-13), amount:-23.40, note:'DELIVEROO'}); leakReport(r, 'your bank file'); }
+  if (w === 'pause') A.pauseModal(null, {name:'New trainers', price:85});
   if (w === 'log') { A.logModal(); document.getElementById('m_amt').value = '12.50'; document.getElementById('m_note').value = 'Coffee with Mia'; }
 }, 400);
 if ('serviceWorker' in navigator && location.protocol.startsWith('http') && !QS.has('show')) navigator.serviceWorker.register('sw.js').catch(()=>{});
